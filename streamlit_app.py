@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from tensorflow.keras.models import load_model
 
 models = {
-    'CNN': load_model('EmoClassify/model/model.h5')
+    'CNN': load_model('model.h5')
 }
 
 def detect_face_and_crop(image):
