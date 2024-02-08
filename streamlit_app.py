@@ -3,6 +3,7 @@ import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 import joblib
+import sklearn
 from tensorflow.keras.models import load_model
 from tensorflow.keras.applications.vgg16 import VGG16
 from tensorflow.keras.models import Model
