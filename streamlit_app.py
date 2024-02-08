@@ -2,11 +2,63 @@ import streamlit as st
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
+import joblib
 from tensorflow.keras.models import load_model
+from tensorflow.keras.applications.vgg16 import VGG16
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import GlobalAveragePooling2D
+
+base_model = VGG16(weights='imagenet', include_top=False, input_shape=(48, 48, 3))
+
+x = base_model.output
+x = GlobalAveragePooling2D()(x)
+
+feature_extractor = Model(inputs=base_model.input, outputs=x)
+
+def extract_features(image, model):
+    image = np.expand_dims(image, axis=0)
+    features = model.predict(image)
+    return features
+
+
+cnn_model = load_model('EmoClassify/model/CNN_model.h5')
+cnn2_model = load_model('EmoClassify/model/CNN2_model.h5')
+dtree_model = joblib.load('EmoClassify/model/decisionTreeModel.joblib')
+kmeans_model = joblib.load('EmoClassify/model/emotion_kmeans_model.pkl')
 
 models = {
-    'CNN': load_model('/mount/src/emoclassify/model.h5')
+    'CNN': cnn_model,
+    'CNN2': cnn2_model,
+    'Decision Tree': dtree_model,
+    'KMeans': kmeans_model,
 }
+def preprocess_image_for_kmeans(image, base_model):  
+    if image.shape[-1] == 3:
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    
+    image = image.astype('float32') / 255.0
+    image_batch = np.expand_dims(image, axis=0)
+
+    features = base_model.predict(image_batch)
+    features_flattened = features.flatten().reshape(1, -1)
+    
+    return features_flattened
+
+def preprocess_image_for_dtree(image):
+    image_gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    image_resized = cv2.resize(image_gray, (48, 48))
+    image_flattened = image_resized.flatten()
+    return image_flattened
+
+def classify_emotion_dtree(model, uploaded_file):
+    file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
+    image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+    if image is None:
+        return "No face detected"
+    preprocessed_image = preprocess_image_for_dtree(image)
+    emotion_index = model.predict([preprocessed_image])[0]
+    emotion_labels = ["angry", "disgusted", "fearful", "happy", "neutral", "sad", "surprised"]
+    return emotion_labels[emotion_index]
 
 def detect_face_and_crop(image):
     face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
@@ -37,26 +89,34 @@ def preprocess_image(face, model):
     face = np.expand_dims(face, axis=0)
     return face
 
-def classify_emotion(model, uploaded_file):
+def classify_emotion(model, uploaded_file, model_type):
     file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
     image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
 
     if image is None:
-        st.error("No face detected or the image file could not be processed.")
         return "No face detected or the image file could not be processed."
 
     face = detect_face_and_crop(image)
     if face is None:
-        st.error("No face detected")
         return "No face detected"
 
-    img_array = preprocess_image(face, model)
+    if model_type in ['CNN', 'CNN2']:
+        img_array = preprocess_image(face, model)
+        predictions = model.predict(img_array)
+        emotion_index = np.argmax(predictions)
+    elif model_type == 'Decision Tree':
+        img_array = preprocess_image_for_dtree(face)
+        img_array = img_array.reshape(1, -1)
+        emotion_index = model.predict(img_array)[0]
+        if isinstance(emotion_index, np.integer):
+            return emotion_labels[emotion_index]
+        return emotion_index
+    elif model_type == 'KMeans':
+        features = extract_features(face, feature_extractor)
+        emotion_index = model.predict(features)[0]
 
-    predictions = model.predict(img_array)
-    emotion_index = np.argmax(predictions)
     emotion_labels = ["angry", "disgusted", "fearful", "happy", "neutral", "sad", "surprised"]
-    return emotion_labels[emotion_index] 
-
+    return emotion_labels[emotion_index]
 
 def plot_emotion_distribution(emotion_counts):
     fig, ax = plt.subplots(figsize=(8, 4))
@@ -84,7 +144,7 @@ def main():
 
     uploaded_files = st.file_uploader("Choose one or more images...", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
 
-    emotion_counts = {'happy': 0, 'sad': 0, 'angry': 0, 'surprised': 0, 'neutral': 0, 'disgusted': 0, 'fearful': 0}
+    emotion_counts = {'happy': 0, 'sad': 0, 'angry': 0, 'surprised': 0, 'neutral': 0, 'disgusted': 0, 'fearful': 0, 'unknown': 0}
 
     if uploaded_files:
         if len(uploaded_files) > 1:
@@ -95,21 +155,21 @@ def main():
         selected_image = uploaded_files[slideshow_index]
 
         st.image(selected_image, caption=f"Image {slideshow_index}", width=300)
-        emotion = classify_emotion(model, selected_image)
+        emotion = classify_emotion(model, selected_image, model_type=model_name)
         emotion_counts[emotion] += 1
         st.write(f"**Emotion:** {emotion}")
 
-        emotion_counts = {'happy': 0, 'sad': 0, 'angry': 0, 'surprised': 0, 'neutral': 0, 'disgusted': 0, 'fearful': 0}
+        emotion_counts = {'happy': 0, 'sad': 0, 'angry': 0, 'surprised': 0, 'neutral': 0, 'disgusted': 0, 'fearful': 0, 'unknown': 0}
 
         st.markdown("---")
 
         for img_file in uploaded_files:
             img_file.seek(0)
-            emotion = classify_emotion(model, img_file)
+            emotion = classify_emotion(model, img_file, model_type=model_name)
             if emotion in emotion_counts:
                 emotion_counts[emotion] += 1
             else:
-                st.error(emotion)
+                st.error(f"Could not classify emotion for the image: {img_file.name}")
 
         row0_spacer1, row0_1, row0_spacer2, row0_2, = st.columns((.1, 2.3, .1, 1.3))
         with row0_1:
