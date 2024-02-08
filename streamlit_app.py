@@ -21,10 +21,10 @@ def extract_features(image, model):
     return features
 
 
-cnn_model = load_model('CNN_model.h5')
-cnn2_model = load_model('CNN2_model.h5')
-dtree_model = joblib.load('decisionTreeModel.joblib')
-kmeans_model = joblib.load('emotion_kmeans_model.pkl')
+cnn_model = load_model('EmoClassify/model/CNN_model.h5')
+cnn2_model = load_model('EmoClassify/model/CNN2_model.h5')
+dtree_model = joblib.load('EmoClassify/modeld/ecisionTreeModel.joblib')
+kmeans_model = joblib.load('EmoClassify/model/emotion_kmeans_model.pkl')
 
 models = {
     'CNN': cnn_model,
